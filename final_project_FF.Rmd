@@ -1,0 +1,242 @@
+---
+title: "Fantasy Football_project"
+author: "Michael Robinson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+In this project I combine player statistics with sentiment analysis to assist with  decision-making in fantasy football. The project data-driven methodology to predict and study player performance, using sentiment scores to gain insights into player capabilities and public opinion. using data cleansing, performance analysis by position, and correlation study, using  Random Forest algorithms to forecast player outcomes. This project makes a contribution by looking at how people's opinions about players relate to their fantasy football scores. This adds a new layer to how we think about player worth. It provides predictions and visual data that fans can understand and use.
+
+## Read the Data from a CSV File
+
+```{r cars}
+library(readr)
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(caret)
+library(shiny)
+library(corrplot)
+library(ggplot2)
+library(scales)
+library(purrr)
+
+
+data <- read_csv("~/OneDrive - CUNY/yearly_data_updated_08_23.csv", show_col_types = FALSE)
+sentiment_data <- read.csv("~/OneDrive - CUNY/data607/sentiment.csv")
+
+```
+
+## Data Cleaning and Preparation
+
+Cleaning the dataset by selecting relevant columns and dividing the data into previous and current season datasets for analysis.
+
+```{r}
+data_cleaned <- data %>%
+  select(id, name, position, team, season, passing_yards, passing_tds, rushing_yards, 
+         rushing_tds, receptions, receiving_yards, receiving_tds, fantasy_points_ppr)
+
+latest_season <- max(data_cleaned$season)
+
+prev_seasons <- data_cleaned %>% filter(season < latest_season)
+current_data <- data_cleaned %>% filter(season == latest_season)
+
+```
+
+## Top Performer by position
+Visualizes the top performers in key positions such as Quarter Backs, Running Backs, and Wide Receivers.
+
+```{r}
+
+Quarter_Backs <- data_cleaned %>% top_n(5, passing_yards)
+Running_Backs <- data_cleaned %>% top_n(5, rushing_yards)
+Wide_Receiver <- data_cleaned %>% top_n(5, receiving_yards)
+
+# Top Quarter Backs
+ggplot(Quarter_Backs, aes(x = reorder(name, passing_yards), y = passing_yards, fill = name)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 5 Passers", x = "Player", y = "Passing Yards") +
+  theme_minimal() +
+  scale_fill_viridis_d()
+
+#  Top Running Backs
+ggplot(Running_Backs, aes(x = reorder(name, rushing_yards), y = rushing_yards, fill = name)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 5 Rushers", x = "Player", y = "Rushing Yards") +
+  theme_minimal() +
+  scale_fill_viridis_d()
+
+# Top Wide Receivers
+ggplot(Wide_Receiver, aes(x = reorder(name, receiving_yards), y = receiving_yards, fill = name)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 5 Receivers", x = "Player", y = "Receiving Yards") +
+  theme_minimal() +
+  scale_fill_viridis_d()
+
+```
+
+## Average Points by position
+Calculates and visualizes the average fantasy points scored in each position,  to providing insights into performance trends of different player roles.
+
+```{r}
+
+
+avg_points_per_position <- data_cleaned %>%
+  group_by(position) %>%
+  summarise(average_fantasy_points = mean(fantasy_points_ppr, na.rm = TRUE))
+
+
+ggplot(avg_points_per_position, aes(x = position, y = average_fantasy_points, fill = position)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Average Fantasy Points PPR by Position", x = "Position", y = "Average Fantasy Points")
+
+```
+
+## Correlation Analysis
+Examines the relationships between various statistical measures in the data, to understand the interdependencies and patterns.
+
+```{r}
+
+correlation_matrix <- cor(data_cleaned %>% select(-id, -name, -team, -position))
+
+corrplot(correlation_matrix, method = "circle", type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+```
+
+## Model Training
+Teaching a Random Forest model using past data, to be used making future predictions
+
+```{r}
+
+model <- randomForest(fantasy_points_ppr ~ . -id -name -season, data = prev_seasons)
+
+
+```
+
+## Selecting Random Players for Prediction
+
+Randomly selects players from the current season's dataset to use for predictive modeling
+
+```{r}
+set.seed(123) 
+sample_size <- 10 
+sampled_players <- current_data %>% sample_n(sample_size)
+
+predict_data <- sampled_players %>% select(-fantasy_points_ppr)
+
+
+```
+
+## Making and displaying Predictions
+
+using the trained model to forecast fantasy points for the chosen players and display predictions.
+
+```{r}
+predicted_points <- predict(model, predict_data)
+
+predicted_points_rounded <- round(predicted_points, 2)
+
+sampled_players$predicted_fantasy_points_ppr <- predicted_points_rounded
+
+print(sampled_players %>% select(name, season, fantasy_points_ppr, predicted_fantasy_points_ppr))
+
+```
+
+## Outputting the Predictions into a plot
+
+A Visual representation of the predicted points, to aid in the comparison and interpretation of the model's output.
+
+```{r}
+
+# Creating a bar plot with the predicted fantasy points
+ggplot(sampled_players, aes(x = reorder(name, predicted_fantasy_points_ppr), y = predicted_fantasy_points_ppr)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Predicted Fantasy Points PPR for Selected Players", x = "Player", y = "Predicted Fantasy Points PPR") +
+  coord_flip() + # Flipping the coordinates for better readability of player names
+  geom_text(aes(label = predicted_fantasy_points_ppr), hjust = -0.1) # Adding labels to the bars
+
+```
+
+## Fantasy Points vs Positive Sentiment
+
+A visual to show the correlation between the sentiment score of players and the fantasy points
+
+```{r}
+
+combined_data <- merge(data_cleaned, sentiment_data, by = "name")
+
+# Assuming combined_data has columns for fantasy points and sentiment scores
+# Calculate correlation between fantasy points and positive sentiment
+correlation_pos = cor(combined_data$fantasy_points, combined_data$pos, use = "complete.obs")
+
+# Calculate correlation between fantasy points and negative sentiment
+correlation_neg = cor(combined_data$fantasy_points, combined_data$neg, use = "complete.obs")
+
+# Scatter plot of fantasy points vs positive sentiment
+ggplot(combined_data, aes(x = pos, y = fantasy_points_ppr)) +
+    geom_point() +
+    labs(title = "Fantasy Points vs Positive Sentiment",
+         x = "Positive Sentiment Score",
+         y = "Fantasy Points")
+
+```
+
+## Sentiment Scores by Position
+
+The visual displays the distribution of positive sentiment scores across four different positions in a sport, which are labeled as QB (Quarterback), RB (Running Back), TE (Tight End), and WR (Wide Receiver).
+
+```{r}
+
+ggplot(combined_data, aes(x = Pos, y = pos)) +
+    geom_boxplot() +
+    labs(title = "Positive Sentiment Scores by Position", x = "Position", y = "Positive Sentiment Score")
+
+``` 
+
+## Sentiment Score over Time 
+The chart displays the average positive sentiment score for each season, with seasons 
+
+```{r}
+
+# Plotting the average positive sentiment score for each season
+ggplot(combined_data, aes(x = season, y = pos)) +
+    geom_bar(stat = "summary", fun = "mean", fill = "blue") +
+    labs(title = "Average Positive Sentiment Scores Over Seasons", x = "Season", y = "Average Positive Sentiment Score")
+
+```
+
+## Identify Top  Players
+
+```{r}
+
+combined_data$combined_score <- combined_data$pos + combined_data$fantasy_points_ppr
+
+top_players <- combined_data[order(combined_data$combined_score, decreasing = TRUE), ][1:10, ]
+
+ggplot(top_players, aes(x = reorder(name, combined_score))) +
+    geom_bar(aes(y = pos), stat = "identity", position = position_dodge(), fill = "blue") +
+    geom_line(aes(y = fantasy_points_ppr/10, group = 1), color = "red", size = 1) + # scaling down fantasy points for visualization
+    scale_y_continuous(sec.axis = sec_axis(~.*10, name = "Fantasy Points PPR")) +
+    labs(title = "Top Players by Sentiment Scores and Fantasy Points",
+         x = "Player",
+         y = "Positive Sentiment Score") +
+    coord_flip()
+
+```
+
+## Conclusion 
+This project showcases the intersection of data analytics and fantasy football through player performance and public sentiment analysis. The project highlights the importance of statistical data and player sentiment to determining fantasy player value, offering a multifaceted perspective of the game. These insights are not only important for current strategy but will also shape future approaches in fantasy football, helping enthusiasts and analysts make informed decisions and gain a competitive advantage.
